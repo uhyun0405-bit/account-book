@@ -3,7 +3,7 @@ import {
   Wallet, TrendingDown, TrendingUp, Settings, LayoutDashboard, Plus, Receipt,
   CalendarDays, BarChart as BarChartIcon, Pencil, Check, X, Trash2, Download, Upload,
   Save, RefreshCw, ChevronLeft, ChevronRight, AlertCircle, CopyPlus, Info, Star, CreditCard, Zap, PiggyBank,
-  PieChart as PieChartIcon, Search, Filter, Target
+  PieChart as PieChartIcon, Search, Filter, Target, Database
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
 
@@ -866,8 +866,8 @@ const ReportTab = ({ items, paymentMethods, transactions, onDeleteTransaction, g
   );
 };
 
-// --- [탭 4] 항목 & 결제수단 관리 / 백업 컴포넌트 ---
-const ItemManagementTab = ({ items, paymentMethods, transactions, quickAdds, goals, onAddItem, onUpdateItem, onDeleteItem, onAddPM, onDeletePM, onAddGoal, onDeleteGoal }) => {
+// --- [탭 4] 항목 & 결제수단 관리 컴포넌트 ---
+const ItemManagementTab = ({ items, paymentMethods, goals, onAddItem, onUpdateItem, onDeleteItem, onAddPM, onDeletePM, onAddGoal, onDeleteGoal }) => {
   const [newItem, setNewItem] = useState({ type: 'EXPENSE', category: '', name: '' });
   const [newPM, setNewPM] = useState('');
   const [newGoal, setNewGoal] = useState({ name: '', targetAmount: '' });
@@ -875,7 +875,6 @@ const ItemManagementTab = ({ items, paymentMethods, transactions, quickAdds, goa
   const [editingItemId, setEditingItemId] = useState(null);
   const [editFormData, setEditFormData] = useState({});
   const [deletingItemId, setDeletingItemId] = useState(null);
-  const fileInputRef = useRef(null);
   const [inlineMessage, setInlineMessage] = useState(null);
 
   const showMessage = (msg, type = 'success') => {
@@ -919,36 +918,6 @@ const ItemManagementTab = ({ items, paymentMethods, transactions, quickAdds, goa
     if (!editFormData.name) return;
     onUpdateItem({ ...items.find(i => i.id === id), ...editFormData, updatedAt: new Date().toISOString() });
     setEditingItemId(null); 
-  };
-
-  const handleExportBackup = () => {
-    const backupData = { items, paymentMethods, transactions, quickAdds, goals, exportDate: new Date().toISOString() };
-    const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url;
-    a.download = `가계부_데이터백업_${new Date().toISOString().slice(0,10)}.json`; a.click();
-    URL.revokeObjectURL(url); showMessage('데이터 백업 파일이 다운로드 되었습니다.');
-  };
-
-  const handleImportBackup = (e) => {
-    const file = e.target.files[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const imported = JSON.parse(event.target.result);
-        if (imported.items && imported.transactions) {
-          saveLocalData('accountbook_local_items', imported.items);
-          saveLocalData('accountbook_local_txs', imported.transactions);
-          if (imported.paymentMethods) saveLocalData('accountbook_pay_methods', imported.paymentMethods);
-          if (imported.quickAdds) saveLocalData('accountbook_quick_adds', imported.quickAdds);
-          if (imported.goals) saveLocalData('accountbook_goals', imported.goals);
-          showMessage('✅ 데이터 복원 성공! 페이지를 새로고침합니다...', 'success');
-          setTimeout(() => window.location.reload(), 1500); 
-        } else { showMessage('❌ 올바른 백업 파일이 아닙니다.', 'error'); }
-      } catch (err) { showMessage('❌ 파일을 읽는 중 오류가 발생했습니다.', 'error'); }
-      e.target.value = '';
-    };
-    reader.readAsText(file);
   };
 
   return (
@@ -1026,17 +995,6 @@ const ItemManagementTab = ({ items, paymentMethods, transactions, quickAdds, goa
             ))}
           </div>
         </div>
-
-        <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl border border-indigo-200 shadow-sm p-4 sm:p-5 relative overflow-hidden">
-          <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none"><RefreshCw size={80} /></div>
-          <h2 className="text-sm font-bold text-indigo-900 mb-2 flex items-center gap-2 relative z-10"><Save size={16} /> 오프라인 데이터 백업/복원</h2>
-          <p className="text-[11px] text-slate-600 mb-4 leading-relaxed relative z-10">데이터는 현재 브라우저에만 안전하게 저장됩니다. 기기를 바꿀 땐 백업 파일을 받아 새 폰에서 불러오세요.</p>
-          <div className="flex flex-col gap-2.5 relative z-10">
-            <button onClick={handleExportBackup} className="flex items-center justify-center gap-2 w-full bg-white border border-indigo-200 text-indigo-700 py-2.5 rounded-lg hover:bg-indigo-50 text-xs font-bold transition-all shadow-sm"><Download size={15} /> 1. 데이터 백업 파일 저장</button>
-            <button onClick={() => fileInputRef.current?.click()} className="flex items-center justify-center gap-2 w-full bg-indigo-600 text-white py-2.5 rounded-lg hover:bg-indigo-700 text-xs font-bold transition-all shadow-sm"><Upload size={15} /> 2. 백업 파일 불러오기</button>
-            <input type="file" accept=".json" ref={fileInputRef} style={{ display: 'none' }} onChange={handleImportBackup} />
-          </div>
-        </div>
       </div>
 
       <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-fit">
@@ -1097,6 +1055,74 @@ const ItemManagementTab = ({ items, paymentMethods, transactions, quickAdds, goa
               )}
             </tbody>
           </table>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- [신규 탭] 데이터 백업 / 복원 컴포넌트 ---
+const BackupRestoreTab = ({ items, paymentMethods, transactions, quickAdds, goals }) => {
+  const fileInputRef = useRef(null);
+  const [inlineMessage, setInlineMessage] = useState(null);
+
+  const showMessage = (msg, type = 'success') => {
+    setInlineMessage({ msg, type }); setTimeout(() => setInlineMessage(null), 4000);
+  };
+
+  const handleExportBackup = () => {
+    const backupData = { items, paymentMethods, transactions, quickAdds, goals, exportDate: new Date().toISOString() };
+    const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url;
+    a.download = `가계부_데이터백업_${new Date().toISOString().slice(0,10)}.json`; a.click();
+    URL.revokeObjectURL(url); showMessage('데이터 백업 파일이 내 컴퓨터에 다운로드 되었습니다.');
+  };
+
+  const handleImportBackup = (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const imported = JSON.parse(event.target.result);
+        if (imported.items && imported.transactions) {
+          saveLocalData('accountbook_local_items', imported.items);
+          saveLocalData('accountbook_local_txs', imported.transactions);
+          if (imported.paymentMethods) saveLocalData('accountbook_pay_methods', imported.paymentMethods);
+          if (imported.quickAdds) saveLocalData('accountbook_quick_adds', imported.quickAdds);
+          if (imported.goals) saveLocalData('accountbook_goals', imported.goals);
+          showMessage('✅ 데이터 복원 성공! 페이지를 새로고침합니다...', 'success');
+          setTimeout(() => window.location.reload(), 1500); 
+        } else { showMessage('❌ 올바른 백업 파일이 아닙니다.', 'error'); }
+      } catch (err) { showMessage('❌ 파일을 읽는 중 오류가 발생했습니다.', 'error'); }
+      e.target.value = '';
+    };
+    reader.readAsText(file);
+  };
+
+  return (
+    <div className="max-w-3xl mx-auto mt-4 space-y-6">
+      {inlineMessage && (
+        <div className={`p-4 text-sm font-bold rounded-xl flex items-center gap-2 shadow-sm ${inlineMessage.type === 'error' ? 'bg-red-50 text-red-600 border border-red-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
+          {inlineMessage.type === 'error' ? <AlertCircle size={18} className="shrink-0"/> : <Check size={18} className="shrink-0"/>}
+          {inlineMessage.msg}
+        </div>
+      )}
+      <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-2xl border border-indigo-200 shadow-sm p-6 sm:p-10 relative overflow-hidden">
+        <div className="absolute top-1/2 right-4 -translate-y-1/2 p-8 opacity-5 pointer-events-none"><RefreshCw size={200} /></div>
+        <h2 className="text-xl font-black text-indigo-900 mb-3 flex items-center gap-2 relative z-10"><Database size={24} className="text-indigo-600" /> 오프라인 데이터 백업 및 복원</h2>
+        <p className="text-sm text-slate-600 mb-10 leading-relaxed relative z-10 break-keep">
+          이 가계부 앱의 모든 데이터는 안전하게 <strong>현재 사용 중인 기기의 브라우저</strong>에만 저장됩니다.<br/>
+          핸드폰을 바꾸거나 다른 컴퓨터에서 내역을 이어가고 싶다면, 데이터를 파일로 내려받아 새 기기에서 불러오세요.
+        </p>
+        <div className="flex flex-col sm:flex-row gap-4 relative z-10">
+          <button onClick={handleExportBackup} className="flex-1 flex items-center justify-center gap-2 bg-white border-2 border-indigo-200 text-indigo-700 py-4 rounded-xl hover:bg-indigo-50 text-sm font-bold transition-all shadow-sm">
+            <Download size={20} /> 1. 데이터 백업 파일 저장
+          </button>
+          <button onClick={() => fileInputRef.current?.click()} className="flex-1 flex items-center justify-center gap-2 bg-indigo-600 text-white py-4 rounded-xl hover:bg-indigo-700 text-sm font-bold transition-all shadow-sm">
+            <Upload size={20} /> 2. 백업 파일 불러오기
+          </button>
+          <input type="file" accept=".json" ref={fileInputRef} style={{ display: 'none' }} onChange={handleImportBackup} />
         </div>
       </div>
     </div>
@@ -1190,6 +1216,7 @@ export default function App() {
             <button onClick={() => setActiveTab('transactions')} className={`px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 shrink-0 transition-all ${activeTab === 'transactions' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-100'}`}><Receipt size={16} />수입/지출 입력</button>
             <button onClick={() => setActiveTab('calendar')} className={`px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 shrink-0 transition-all ${activeTab === 'calendar' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-100'}`}><CalendarDays size={16} />통계/상세조회</button>
             <button onClick={() => setActiveTab('items')} className={`px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 shrink-0 transition-all ${activeTab === 'items' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-100'}`}><Settings size={16} />항목 관리</button>
+            <button onClick={() => setActiveTab('backup')} className={`px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 shrink-0 transition-all ${activeTab === 'backup' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:bg-indigo-50 hover:text-indigo-600'}`}><Database size={16} />백업/복원</button>
           </nav>
         </div>
       </header>
@@ -1198,7 +1225,8 @@ export default function App() {
         {activeTab === 'dashboard' && <DashboardTab items={items} paymentMethods={paymentMethods} transactions={transactions} onImportFixedTransactions={handleImportFixedTransactions} budget={budget} setBudget={setBudget} onDeleteTransaction={handleDeleteTransaction} goals={goals} />}
         {activeTab === 'transactions' && <TransactionTab items={items} paymentMethods={paymentMethods} transactions={transactions} quickAdds={quickAdds} setQuickAdds={setQuickAdds} goals={goals} onAddTransaction={handleAddTransaction} onDeleteTransaction={handleDeleteTransaction} />}
         {activeTab === 'calendar' && <ReportTab items={items} paymentMethods={paymentMethods} transactions={transactions} onDeleteTransaction={handleDeleteTransaction} goals={goals} />}
-        {activeTab === 'items' && <ItemManagementTab items={items} paymentMethods={paymentMethods} transactions={transactions} quickAdds={quickAdds} goals={goals} onAddItem={handleAddItem} onUpdateItem={handleUpdateItem} onDeleteItem={handleDeleteItem} onAddPM={handleAddPM} onDeletePM={handleDeletePM} onAddGoal={handleAddGoal} onDeleteGoal={handleDeleteGoal} />}
+        {activeTab === 'items' && <ItemManagementTab items={items} paymentMethods={paymentMethods} goals={goals} onAddItem={handleAddItem} onUpdateItem={handleUpdateItem} onDeleteItem={handleDeleteItem} onAddPM={handleAddPM} onDeletePM={handleDeletePM} onAddGoal={handleAddGoal} onDeleteGoal={handleDeleteGoal} />}
+        {activeTab === 'backup' && <BackupRestoreTab items={items} paymentMethods={paymentMethods} transactions={transactions} quickAdds={quickAdds} goals={goals} />}
       </main>
     </div>
   );
