@@ -120,17 +120,18 @@ const DashboardTab = ({ items, paymentMethods, transactions, onImportFixedTransa
     return { income, expense };
   }, [transactions, currentMonthStr]);
 
+  // 퍼센테이지 뱃지의 왼쪽 여백(ml-1)을 제거하여 위쪽 배치를 깔끔하게 수정
   const renderTrend = (current, prev, type) => {
     if (prev === 0) return null;
     const diff = current - prev;
     const percent = Math.abs((diff / prev) * 100).toFixed(1);
     
     if (type === 'INCOME') {
-      if (diff > 0) return <span className="text-[10px] text-blue-600 font-bold ml-1 bg-blue-50 px-1.5 py-0.5 rounded">▲ {percent}% 📈</span>;
-      if (diff < 0) return <span className="text-[10px] text-red-600 font-bold ml-1 bg-red-50 px-1.5 py-0.5 rounded">▼ {percent}% 📉</span>;
+      if (diff > 0) return <span className="text-[10px] text-blue-600 font-bold inline-block bg-blue-50 px-1.5 py-0.5 rounded">▲ {percent}% 📈</span>;
+      if (diff < 0) return <span className="text-[10px] text-red-600 font-bold inline-block bg-red-50 px-1.5 py-0.5 rounded">▼ {percent}% 📉</span>;
     } else { 
-      if (diff > 0) return <span className="text-[10px] text-red-600 font-bold ml-1 bg-red-50 px-1.5 py-0.5 rounded">▲ {percent}% 📈</span>;
-      if (diff < 0) return <span className="text-[10px] text-blue-600 font-bold ml-1 bg-blue-50 px-1.5 py-0.5 rounded">▼ {percent}% 📉</span>;
+      if (diff > 0) return <span className="text-[10px] text-red-600 font-bold inline-block bg-red-50 px-1.5 py-0.5 rounded">▲ {percent}% 📈</span>;
+      if (diff < 0) return <span className="text-[10px] text-blue-600 font-bold inline-block bg-blue-50 px-1.5 py-0.5 rounded">▼ {percent}% 📉</span>;
     }
     return null;
   };
@@ -254,32 +255,40 @@ const DashboardTab = ({ items, paymentMethods, transactions, onImportFixedTransa
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {/* 증감률 위치를 상단으로 변경한 카드들 */}
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-          <div className="flex items-center gap-2 mb-2 text-blue-600">
+          <div className="h-6 mb-1">
+            {renderTrend(stats.income, prevMonthStats.income, 'INCOME')}
+          </div>
+          <div className="flex items-center gap-2 mb-1 text-blue-600">
             <TrendingUp size={16}/>
             <span className="text-xs font-bold text-slate-500">이번 달 수입</span>
           </div>
-          <div className="flex items-center gap-2">
-            <p className="text-lg font-bold text-blue-600 truncate">{formatCurrency(stats.income)}</p>
-            {renderTrend(stats.income, prevMonthStats.income, 'INCOME')}
-          </div>
+          <p className="text-lg font-bold text-blue-600 truncate">{formatCurrency(stats.income)}</p>
         </div>
+
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-          <div className="flex items-center gap-2 mb-2 text-red-600">
+          <div className="h-6 mb-1">
+            {renderTrend(stats.expense, prevMonthStats.expense, 'EXPENSE')}
+          </div>
+          <div className="flex items-center gap-2 mb-1 text-red-600">
             <TrendingDown size={16}/>
             <span className="text-xs font-bold text-slate-500">이번 달 지출</span>
           </div>
-          <div className="flex items-center gap-2">
-            <p className="text-lg font-bold text-red-600 truncate">{formatCurrency(stats.expense)}</p>
-            {renderTrend(stats.expense, prevMonthStats.expense, 'EXPENSE')}
-          </div>
+          <p className="text-lg font-bold text-red-600 truncate">{formatCurrency(stats.expense)}</p>
         </div>
+
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-          <div className="flex items-center gap-2 mb-2 text-emerald-600"><PiggyBank size={16}/><span className="text-xs font-bold text-slate-500">이번 달 저축/투자</span></div>
+          {/* 레이아웃 정렬을 위해 빈 블록 추가 */}
+          <div className="h-6 mb-1"></div>
+          <div className="flex items-center gap-2 mb-1 text-emerald-600"><PiggyBank size={16}/><span className="text-xs font-bold text-slate-500">이번 달 저축/투자</span></div>
           <p className="text-lg font-bold text-emerald-600 truncate">{formatCurrency(stats.saving)}</p>
         </div>
+
         <div className="bg-slate-800 p-4 rounded-xl shadow-sm text-white">
-          <div className="flex items-center gap-2 mb-2"><Wallet size={16}/><span className="text-xs font-bold text-slate-300">이번 달 남은 돈</span></div>
+          {/* 레이아웃 정렬을 위해 빈 블록 추가 */}
+          <div className="h-6 mb-1"></div>
+          <div className="flex items-center gap-2 mb-1"><Wallet size={16}/><span className="text-xs font-bold text-slate-300">이번 달 남은 돈</span></div>
           <p className="text-lg font-bold text-white truncate">{formatCurrency(stats.balance)}</p>
         </div>
       </div>
