@@ -120,18 +120,17 @@ const DashboardTab = ({ items, paymentMethods, transactions, onImportFixedTransa
     return { income, expense };
   }, [transactions, currentMonthStr]);
 
-  // 퍼센테이지 뱃지의 왼쪽 여백(ml-1)을 제거하여 위쪽 배치를 깔끔하게 수정
   const renderTrend = (current, prev, type) => {
     if (prev === 0) return null;
     const diff = current - prev;
     const percent = Math.abs((diff / prev) * 100).toFixed(1);
     
     if (type === 'INCOME') {
-      if (diff > 0) return <span className="text-[10px] text-blue-600 font-bold inline-block bg-blue-50 px-1.5 py-0.5 rounded">▲ {percent}% 📈</span>;
-      if (diff < 0) return <span className="text-[10px] text-red-600 font-bold inline-block bg-red-50 px-1.5 py-0.5 rounded">▼ {percent}% 📉</span>;
+      if (diff > 0) return <span className="text-[10px] text-blue-600 font-bold ml-1 bg-blue-50 px-1.5 py-0.5 rounded">▲ {percent}% 📈</span>;
+      if (diff < 0) return <span className="text-[10px] text-red-600 font-bold ml-1 bg-red-50 px-1.5 py-0.5 rounded">▼ {percent}% 📉</span>;
     } else { 
-      if (diff > 0) return <span className="text-[10px] text-red-600 font-bold inline-block bg-red-50 px-1.5 py-0.5 rounded">▲ {percent}% 📈</span>;
-      if (diff < 0) return <span className="text-[10px] text-blue-600 font-bold inline-block bg-blue-50 px-1.5 py-0.5 rounded">▼ {percent}% 📉</span>;
+      if (diff > 0) return <span className="text-[10px] text-red-600 font-bold ml-1 bg-red-50 px-1.5 py-0.5 rounded">▲ {percent}% 📈</span>;
+      if (diff < 0) return <span className="text-[10px] text-blue-600 font-bold ml-1 bg-blue-50 px-1.5 py-0.5 rounded">▼ {percent}% 📉</span>;
     }
     return null;
   };
@@ -165,6 +164,22 @@ const DashboardTab = ({ items, paymentMethods, transactions, onImportFixedTransa
 
   const progress = budget > 0 ? Math.min((stats.expense / budget) * 100, 100) : 0;
   const isWarning = progress >= 80;
+
+  // --- 기능 추가: 이번 달 결제 수단별 지출 총액 계산 ---
+  const expensesByPaymentMethod = useMemo(() => {
+    const grouped = {};
+    monthlyTransactions.forEach(tx => {
+      if (tx.type === 'EXPENSE') { // 지출 항목만 집계
+        const pm = paymentMethods.find(p => p.id === tx.paymentMethodId);
+        const pmName = pm ? pm.name : '미지정';
+        grouped[pmName] = (grouped[pmName] || 0) + tx.amount;
+      }
+    });
+    return Object.entries(grouped)
+      .map(([name, amount]) => ({ name, amount }))
+      .sort((a, b) => b.amount - a.amount);
+  }, [monthlyTransactions, paymentMethods]);
+  // --------------------------------------------------
 
   return (
     <div className="space-y-6">
@@ -255,43 +270,55 @@ const DashboardTab = ({ items, paymentMethods, transactions, onImportFixedTransa
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {/* 증감률 위치를 상단으로 변경한 카드들 */}
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-          <div className="h-6 mb-1">
-            {renderTrend(stats.income, prevMonthStats.income, 'INCOME')}
-          </div>
-          <div className="flex items-center gap-2 mb-1 text-blue-600">
+          <div className="flex items-center gap-2 mb-2 text-blue-600">
             <TrendingUp size={16}/>
             <span className="text-xs font-bold text-slate-500">이번 달 수입</span>
           </div>
-          <p className="text-lg font-bold text-blue-600 truncate">{formatCurrency(stats.income)}</p>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-          <div className="h-6 mb-1">
-            {renderTrend(stats.expense, prevMonthStats.expense, 'EXPENSE')}
+          <div className="flex items-center gap-2">
+            <p className="text-lg font-bold text-blue-600 truncate">{formatCurrency(stats.income)}</p>
+            {renderTrend(stats.income, prevMonthStats.income, 'INCOME')}
           </div>
-          <div className="flex items-center gap-2 mb-1 text-red-600">
+        </div>
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex items-center gap-2 mb-2 text-red-600">
             <TrendingDown size={16}/>
             <span className="text-xs font-bold text-slate-500">이번 달 지출</span>
           </div>
-          <p className="text-lg font-bold text-red-600 truncate">{formatCurrency(stats.expense)}</p>
+          <div className="flex items-center gap-2">
+            <p className="text-lg font-bold text-red-600 truncate">{formatCurrency(stats.expense)}</p>
+            {renderTrend(stats.expense, prevMonthStats.expense, 'EXPENSE')}
+          </div>
         </div>
-
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-          {/* 레이아웃 정렬을 위해 빈 블록 추가 */}
-          <div className="h-6 mb-1"></div>
-          <div className="flex items-center gap-2 mb-1 text-emerald-600"><PiggyBank size={16}/><span className="text-xs font-bold text-slate-500">이번 달 저축/투자</span></div>
+          <div className="flex items-center gap-2 mb-2 text-emerald-600"><PiggyBank size={16}/><span className="text-xs font-bold text-slate-500">이번 달 저축/투자</span></div>
           <p className="text-lg font-bold text-emerald-600 truncate">{formatCurrency(stats.saving)}</p>
         </div>
-
         <div className="bg-slate-800 p-4 rounded-xl shadow-sm text-white">
-          {/* 레이아웃 정렬을 위해 빈 블록 추가 */}
-          <div className="h-6 mb-1"></div>
-          <div className="flex items-center gap-2 mb-1"><Wallet size={16}/><span className="text-xs font-bold text-slate-300">이번 달 남은 돈</span></div>
+          <div className="flex items-center gap-2 mb-2"><Wallet size={16}/><span className="text-xs font-bold text-slate-300">이번 달 남은 돈</span></div>
           <p className="text-lg font-bold text-white truncate">{formatCurrency(stats.balance)}</p>
         </div>
       </div>
+
+      {/* --- 기능 추가: 결제 수단별 지출 총액 UI --- */}
+      {expensesByPaymentMethod.length > 0 && (
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm mt-6">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+              <CreditCard size={16} className="text-slate-500"/> 결제 수단별 지출 총액
+            </h3>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+            {expensesByPaymentMethod.map((pm, idx) => (
+              <div key={idx} className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 flex flex-col gap-1.5">
+                <span className="text-xs font-bold text-slate-500">{pm.name}</span>
+                <span className="text-[15px] font-black text-slate-800">{formatCurrency(pm.amount)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {/* -------------------------------------- */}
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mt-6">
         <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/50 flex justify-between items-center">
