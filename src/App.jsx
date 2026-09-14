@@ -3,19 +3,19 @@ import {
   Wallet, TrendingDown, TrendingUp, Settings, LayoutDashboard, Plus, Receipt,
   CalendarDays, BarChart as BarChartIcon, Pencil, Check, X, Trash2, Download, Upload,
   RefreshCw, ChevronLeft, ChevronRight, AlertCircle, CopyPlus, Info, Star, CreditCard, Zap, PiggyBank,
-  PieChart as PieChartIcon, Search, Filter, Target, Database
+  PieChart as PieChartIcon, Search, Filter, Target, Database, Loader2
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
 
+// --- Firebase 연동 ---
+import { db } from './firebase';
+import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+
 const CHART_COLORS = ['#3b82f6', '#ef4444', '#f59e0b', '#10b981', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316'];
 
-// --- 엑셀(XLSX) 다운로드 유틸리티 ---
 const loadXlsxScript = () => {
   return new Promise((resolve, reject) => {
-    if (window.XLSX) {
-      resolve(window.XLSX);
-      return;
-    }
+    if (window.XLSX) { resolve(window.XLSX); return; }
     const script = document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
     script.onload = () => resolve(window.XLSX);
@@ -36,28 +36,9 @@ const exportToExcel = async (filename, rows) => {
   }
 };
 
-// --- 공통 유틸리티 ---
 const formatCurrency = (amount) => {
   if (amount === undefined || amount === null) return '0원';
   return new Intl.NumberFormat('ko-KR').format(amount) + '원';
-};
-
-// --- 로컬 데이터 로딩 ---
-const loadLocalData = (key, fallback) => {
-  try {
-    const val = localStorage.getItem(key);
-    return val ? JSON.parse(val) : fallback;
-  } catch {
-    return fallback;
-  }
-};
-
-const saveLocalData = (key, data) => {
-  try {
-    localStorage.setItem(key, JSON.stringify(data));
-  } catch (e) {
-    console.error("Local storage save error", e);
-  }
 };
 
 const defaultItems = [
@@ -88,7 +69,6 @@ const DashboardTab = ({ items, paymentMethods, transactions, onImportFixedTransa
   const [editingTxId, setEditingTxId] = useState(null);
   const [editTxData, setEditTxData] = useState({});
 
-  // 결제수단별 예산 설정을 위한 상태
   const [isAddingPMBudget, setIsAddingPMBudget] = useState(false);
   const [selectedPM, setSelectedPM] = useState('');
   const [pmBudgetAmt, setPmBudgetAmt] = useState('');
@@ -562,7 +542,9 @@ const DashboardTab = ({ items, paymentMethods, transactions, onImportFixedTransa
                           </td>
                           <td className="px-3 py-3 font-bold text-slate-800 truncate max-w-[120px]">{item ? `[${item.category}] ${item.name}` : '삭제된 항목'}</td>
                           <td className="px-3 py-3 text-slate-500">{pm ? pm.name : '-'}</td>
-                          <td className={`px-3 py-3 text-right font-extrabold text-sm ${amountColor}`}>{amountPrefix}{formatCurrency(tx.amount)}</td>
+                          <td className={`px-3 py-3 text-right font-extrabold text-sm ${amountColor}`}>
+                            {amountPrefix}{formatCurrency(tx.amount)}
+                          </td>
                           <td className="px-3 py-3 text-slate-500 truncate max-w-[120px]">
                             {goal ? <span className="text-[10px] bg-yellow-100 text-yellow-800 font-bold px-1.5 py-0.5 rounded mr-1">🎯 {goal.name}</span> : null}
                             {tx.note || '-'}
@@ -657,7 +639,10 @@ const TransactionTab = ({ items, paymentMethods, transactions, quickAdds, setQui
       note: formData.note,
       goalId: formData.type === 'SAVING' ? formData.goalId : ''
     };
-    setQuickAdds(prev => [...prev, newQa]);
+    setQuickAdds(prev => {
+      const updated = [...prev, newQa];
+      return updated;
+    });
     showMessage(`'${title}' 단축 버튼이 추가되었습니다!`);
   };
 
@@ -1265,7 +1250,6 @@ const ItemManagementTab = ({ items, paymentMethods, goals, onAddItem, onUpdateIt
   const [editFormData, setEditFormData] = useState({});
   const [deletingItemId, setDeletingItemId] = useState(null);
   
-  // 결제수단 수정을 위한 상태
   const [editingPMId, setEditingPMId] = useState(null);
   const [editPMName, setEditPMName] = useState('');
   
@@ -1297,7 +1281,6 @@ const ItemManagementTab = ({ items, paymentMethods, goals, onAddItem, onUpdateIt
     showMessage('결제 수단이 추가되었습니다.');
   };
 
-  // 결제수단 수정 완료 처리
   const handleSaveEditPM = (id) => {
     if (!editPMName.trim()) return;
     onUpdatePM({ id, name: editPMName.trim() });
@@ -1475,38 +1458,13 @@ const ItemManagementTab = ({ items, paymentMethods, goals, onAddItem, onUpdateIt
 };
 
 // --- [탭 5] 데이터 백업 / 복원 컴포넌트 ---
-const BackupRestoreTab = ({ items, paymentMethods, transactions, quickAdds, goals, paymentMethodBudgets, onRestore }) => {
+const BackupRestoreTab = ({ onRestore }) => {
   const fileInputRef = useRef(null);
   const [inlineMessage, setInlineMessage] = useState(null);
 
   const showMessage = (msg, type = 'success') => {
     setInlineMessage({ msg, type }); 
     setTimeout(() => setInlineMessage(null), 4000);
-  };
-
-  const handleExportBackup = () => {
-    try {
-      const backupData = { items, paymentMethods, transactions, quickAdds, goals, paymentMethodBudgets, exportDate: new Date().toISOString() };
-      
-      const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json;charset=utf-8;' });
-      const url = window.URL.createObjectURL(blob);
-      
-      const a = document.createElement('a');
-      a.style.display = 'none';
-      a.href = url;
-      a.download = `가계부_데이터백업_${new Date().toISOString().slice(0,10)}.json`;
-      
-      // DOM에 붙였다가 클릭 후 제거 (안정적인 다운로드)
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-      
-      showMessage('데이터 백업 파일이 기기에 다운로드 되었습니다.');
-    } catch (err) {
-      console.error("Backup Error:", err);
-      showMessage('❌ 백업 파일 생성 중 오류가 발생했습니다.', 'error');
-    }
   };
 
   const handleImportBackup = (e) => {
@@ -1521,7 +1479,7 @@ const BackupRestoreTab = ({ items, paymentMethods, transactions, quickAdds, goal
         // 필수 데이터가 있는지 확인
         if (imported.items && imported.transactions) {
           onRestore(imported); // 부모 컴포넌트에 복원 데이터 전달하여 화면에 즉시 갱신
-          showMessage('✅ 데이터 복원 성공! 화면에 즉시 반영되었습니다.', 'success');
+          showMessage('✅ 데이터 복원 성공! 클라우드에 덮어쓰기 완료되었습니다.', 'success');
         } else { 
           showMessage('❌ 올바른 가계부 백업 파일이 아닙니다.', 'error'); 
         }
@@ -1530,7 +1488,6 @@ const BackupRestoreTab = ({ items, paymentMethods, transactions, quickAdds, goal
         showMessage('❌ 파일을 읽는 중 오류가 발생했습니다. 올바른 json 파일인지 확인해주세요.', 'error'); 
       }
       
-      // 재업로드를 위해 input 초기화
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -1548,17 +1505,14 @@ const BackupRestoreTab = ({ items, paymentMethods, transactions, quickAdds, goal
       )}
       <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-2xl border border-indigo-200 shadow-sm p-6 sm:p-10 relative overflow-hidden">
         <div className="absolute top-1/2 right-4 -translate-y-1/2 p-8 opacity-5 pointer-events-none"><RefreshCw size={200} /></div>
-        <h2 className="text-xl font-black text-indigo-900 mb-3 flex items-center gap-2 relative z-10"><Database size={24} className="text-indigo-600" /> 오프라인 데이터 백업 및 복원</h2>
+        <h2 className="text-xl font-black text-indigo-900 mb-3 flex items-center gap-2 relative z-10"><Database size={24} className="text-indigo-600" /> 기존 데이터 클라우드로 복원</h2>
         <p className="text-sm text-slate-600 mb-10 leading-relaxed relative z-10 break-keep">
-          이 가계부 앱의 모든 데이터는 안전하게 <strong>현재 사용 중인 기기의 브라우저</strong>에만 저장됩니다.<br/>
-          핸드폰을 바꾸거나 다른 컴퓨터에서 내역을 이어가고 싶다면, 데이터를 파일로 내려받아 새 기기에서 불러오세요.
+          이 가계부 앱은 이제 <strong>Firebase 클라우드 연동</strong>을 사용합니다.<br/>
+          예전에 다른 기기나 로컬 버전에 저장해 두었던 <code>.json</code> 백업 파일이 있다면 아래 버튼을 통해 클라우드로 업로드하세요.
         </p>
         <div className="flex flex-col sm:flex-row gap-4 relative z-10">
-          <button onClick={handleExportBackup} className="flex-1 flex items-center justify-center gap-2 bg-white border-2 border-indigo-200 text-indigo-700 py-4 rounded-xl hover:bg-indigo-50 text-sm font-bold transition-all shadow-sm">
-            <Download size={20} /> 1. 데이터 백업 파일 저장
-          </button>
           <button onClick={() => fileInputRef.current?.click()} className="flex-1 flex items-center justify-center gap-2 bg-indigo-600 text-white py-4 rounded-xl hover:bg-indigo-700 text-sm font-bold transition-all shadow-sm">
-            <Upload size={20} /> 2. 백업 파일 불러오기
+            <Upload size={20} /> 예전 백업 파일(.json) 불러오기
           </button>
           <input type="file" accept=".json" ref={fileInputRef} style={{ display: 'none' }} onChange={handleImportBackup} />
         </div>
@@ -1570,50 +1524,77 @@ const BackupRestoreTab = ({ items, paymentMethods, transactions, quickAdds, goal
 // --- [메인 App 컴포넌트] ---
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [appName, setAppName] = useState(() => loadLocalData('accountbook_app_name', '나의 가계부'));
+  const [appName, setAppName] = useState('나의 가계부');
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempAppName, setTempAppName] = useState('');
 
-  const [items, setItems] = useState(() => loadLocalData('accountbook_local_items', defaultItems));
-  const [transactions, setTransactions] = useState(() => loadLocalData('accountbook_local_txs', []));
-  const [budget, setBudget] = useState(() => loadLocalData('accountbook_budget', 1000000));
-  const [paymentMethods, setPaymentMethods] = useState(() => loadLocalData('accountbook_pay_methods', defaultPaymentMethods));
-  const [quickAdds, setQuickAdds] = useState(() => loadLocalData('accountbook_quick_adds', []));
-  const [goals, setGoals] = useState(() => loadLocalData('accountbook_goals', []));
-  
-  // 결제 수단별 예산 저장을 위한 새로운 State
-  const [paymentMethodBudgets, setPaymentMethodBudgets] = useState(() => loadLocalData('accountbook_pm_budgets', {}));
+  const [items, setItems] = useState(defaultItems);
+  const [transactions, setTransactions] = useState([]);
+  const [budget, setBudget] = useState(1000000);
+  const [paymentMethods, setPaymentMethods] = useState(defaultPaymentMethods);
+  const [quickAdds, setQuickAdds] = useState([]);
+  const [goals, setGoals] = useState([]);
+  const [paymentMethodBudgets, setPaymentMethodBudgets] = useState({});
+  const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => saveLocalData('accountbook_local_items', items), [items]);
-  useEffect(() => saveLocalData('accountbook_local_txs', transactions), [transactions]);
-  useEffect(() => saveLocalData('accountbook_budget', budget), [budget]);
-  useEffect(() => saveLocalData('accountbook_pay_methods', paymentMethods), [paymentMethods]);
-  useEffect(() => saveLocalData('accountbook_quick_adds', quickAdds), [quickAdds]);
-  useEffect(() => saveLocalData('accountbook_goals', goals), [goals]);
-  useEffect(() => saveLocalData('accountbook_pm_budgets', paymentMethodBudgets), [paymentMethodBudgets]);
+  // Firestore 데이터 동기화
+  const SYNC_DOC = doc(db, 'accountbook', 'my_device_sync');
+
+  // Firebase 실시간 리스너
+  useEffect(() => {
+    const unsubscribe = onSnapshot(SYNC_DOC, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.appName) setAppName(data.appName);
+        if (data.items) setItems(data.items);
+        if (data.transactions) setTransactions(data.transactions);
+        if (data.budget) setBudget(data.budget);
+        if (data.paymentMethods) setPaymentMethods(data.paymentMethods);
+        if (data.quickAdds) setQuickAdds(data.quickAdds);
+        if (data.goals) setGoals(data.goals);
+        if (data.paymentMethodBudgets) setPaymentMethodBudgets(data.paymentMethodBudgets);
+      } else {
+        // 최초 실행 시 기본 데이터 세팅
+        setDoc(SYNC_DOC, {
+          appName: '나의 가계부', items: defaultItems, transactions: [], budget: 1000000,
+          paymentMethods: defaultPaymentMethods, quickAdds: [], goals: [], paymentMethodBudgets: {}
+        });
+      }
+      setIsLoading(false);
+    });
+    return () => unsubscribe();
+  }, [SYNC_DOC]);
+
+  // 클라우드 업데이트 헬퍼
+  const updateCloud = async (key, value) => {
+    try {
+      await setDoc(SYNC_DOC, { [key]: value }, { merge: true });
+    } catch (e) {
+      console.error("Cloud sync error:", e);
+    }
+  };
 
   const handleNameSave = () => {
     if (tempAppName.trim() !== '') {
-      setAppName(tempAppName.trim());
-      saveLocalData('accountbook_app_name', tempAppName.trim());
+      updateCloud('appName', tempAppName.trim());
     }
     setIsEditingName(false);
   };
 
-  const handleAddItem = (newItem) => setItems(prev => [...prev, newItem]);
-  const handleUpdateItem = (updatedItem) => setItems(prev => prev.map(i => i.id === updatedItem.id ? updatedItem : i));
-  const handleDeleteItem = (id) => setItems(prev => prev.filter(i => i.id !== id));
+  const handleAddItem = (newItem) => updateCloud('items', [...items, newItem]);
+  const handleUpdateItem = (updatedItem) => updateCloud('items', items.map(i => i.id === updatedItem.id ? updatedItem : i));
+  const handleDeleteItem = (id) => updateCloud('items', items.filter(i => i.id !== id));
   
-  const handleAddPM = (newPM) => setPaymentMethods(prev => [...prev, newPM]);
-  const handleUpdatePM = (updatedPM) => setPaymentMethods(prev => prev.map(p => p.id === updatedPM.id ? updatedPM : p));
-  const handleDeletePM = (id) => setPaymentMethods(prev => prev.filter(p => p.id !== id));
+  const handleAddPM = (newPM) => updateCloud('paymentMethods', [...paymentMethods, newPM]);
+  const handleUpdatePM = (updatedPM) => updateCloud('paymentMethods', paymentMethods.map(p => p.id === updatedPM.id ? updatedPM : p));
+  const handleDeletePM = (id) => updateCloud('paymentMethods', paymentMethods.filter(p => p.id !== id));
 
-  const handleAddTransaction = (newTx) => setTransactions(prev => [...prev, newTx]);
-  const handleDeleteTransaction = (id) => setTransactions(prev => prev.filter(tx => tx.id !== id));
-  const handleUpdateTransaction = (updatedTx) => setTransactions(prev => prev.map(tx => tx.id === updatedTx.id ? updatedTx : tx));
+  const handleAddTransaction = (newTx) => updateCloud('transactions', [...transactions, newTx]);
+  const handleDeleteTransaction = (id) => updateCloud('transactions', transactions.filter(tx => tx.id !== id));
+  const handleUpdateTransaction = (updatedTx) => updateCloud('transactions', transactions.map(tx => tx.id === updatedTx.id ? updatedTx : tx));
 
-  const handleAddGoal = (newGoal) => setGoals(prev => [...prev, newGoal]);
-  const handleDeleteGoal = (id) => setGoals(prev => prev.filter(g => g.id !== id));
+  const handleAddGoal = (newGoal) => updateCloud('goals', [...goals, newGoal]);
+  const handleDeleteGoal = (id) => updateCloud('goals', goals.filter(g => g.id !== id));
 
   const handleImportFixedTransactions = (missingFixedTxs, targetMonthStr) => {
     const newTxs = missingFixedTxs.map(ftx => {
@@ -1635,18 +1616,45 @@ export default function App() {
         createdAt: new Date().toISOString()
       };
     });
-    setTransactions(prev => [...prev, ...newTxs]);
+    updateCloud('transactions', [...transactions, ...newTxs]);
   };
 
-  // 백업 파일 복원 함수 (상태 즉시 업데이트)
-  const handleRestoreData = (data) => {
-    if (data.items) setItems(data.items);
-    if (data.transactions) setTransactions(data.transactions);
-    if (data.paymentMethods) setPaymentMethods(data.paymentMethods);
-    if (data.quickAdds) setQuickAdds(data.quickAdds);
-    if (data.goals) setGoals(data.goals);
-    if (data.paymentMethodBudgets) setPaymentMethodBudgets(data.paymentMethodBudgets);
+  const handleRestoreData = async (data) => {
+    try {
+      await setDoc(SYNC_DOC, {
+        appName: data.appName || appName,
+        items: data.items || items,
+        transactions: data.transactions || transactions,
+        budget: data.budget || budget,
+        paymentMethods: data.paymentMethods || paymentMethods,
+        quickAdds: data.quickAdds || quickAdds,
+        goals: data.goals || goals,
+        paymentMethodBudgets: data.paymentMethodBudgets || paymentMethodBudgets
+      });
+    } catch(e) {
+      console.error(e);
+    }
   };
+
+  const cloudSetBudget = (newBudget) => updateCloud('budget', newBudget);
+  const cloudSetQuickAdds = (updater) => {
+     const nextVal = typeof updater === 'function' ? updater(quickAdds) : updater;
+     updateCloud('quickAdds', nextVal);
+  }
+  const cloudSetPaymentMethodBudgets = (updater) => {
+     const nextVal = typeof updater === 'function' ? updater(paymentMethodBudgets) : updater;
+     updateCloud('paymentMethodBudgets', nextVal);
+  }
+
+  // 로딩 화면
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center text-slate-500">
+        <Loader2 size={40} className="animate-spin text-blue-600 mb-4" />
+        <p className="font-bold">클라우드 데이터 실시간 연동 중...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-10">
@@ -1662,6 +1670,11 @@ export default function App() {
                   {appName} <Pencil size={14} className="text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" />
                 </h1>
               )}
+              {/* 연동 상태 표시 뱃지 */}
+              <div className="flex items-center gap-1 bg-emerald-50 border border-emerald-200 text-emerald-700 px-2 py-0.5 rounded-full text-[10px] font-bold ml-2">
+                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
+                실시간 연동 켜짐
+              </div>
             </div>
           </div>
 
@@ -1676,11 +1689,11 @@ export default function App() {
       </header>
 
       <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {activeTab === 'dashboard' && <DashboardTab items={items} paymentMethods={paymentMethods} transactions={transactions} onImportFixedTransactions={handleImportFixedTransactions} budget={budget} setBudget={setBudget} onDeleteTransaction={handleDeleteTransaction} onUpdateTransaction={handleUpdateTransaction} goals={goals} paymentMethodBudgets={paymentMethodBudgets} setPaymentMethodBudgets={setPaymentMethodBudgets} />}
-        {activeTab === 'transactions' && <TransactionTab items={items} paymentMethods={paymentMethods} transactions={transactions} quickAdds={quickAdds} setQuickAdds={setQuickAdds} goals={goals} onAddTransaction={handleAddTransaction} onDeleteTransaction={handleDeleteTransaction} onUpdateTransaction={handleUpdateTransaction} />}
+        {activeTab === 'dashboard' && <DashboardTab items={items} paymentMethods={paymentMethods} transactions={transactions} onImportFixedTransactions={handleImportFixedTransactions} budget={budget} setBudget={cloudSetBudget} onDeleteTransaction={handleDeleteTransaction} onUpdateTransaction={handleUpdateTransaction} goals={goals} paymentMethodBudgets={paymentMethodBudgets} setPaymentMethodBudgets={cloudSetPaymentMethodBudgets} />}
+        {activeTab === 'transactions' && <TransactionTab items={items} paymentMethods={paymentMethods} transactions={transactions} quickAdds={quickAdds} setQuickAdds={cloudSetQuickAdds} goals={goals} onAddTransaction={handleAddTransaction} onDeleteTransaction={handleDeleteTransaction} onUpdateTransaction={handleUpdateTransaction} />}
         {activeTab === 'calendar' && <ReportTab items={items} paymentMethods={paymentMethods} transactions={transactions} onDeleteTransaction={handleDeleteTransaction} onUpdateTransaction={handleUpdateTransaction} goals={goals} />}
         {activeTab === 'items' && <ItemManagementTab items={items} paymentMethods={paymentMethods} goals={goals} onAddItem={handleAddItem} onUpdateItem={handleUpdateItem} onDeleteItem={handleDeleteItem} onAddPM={handleAddPM} onUpdatePM={handleUpdatePM} onDeletePM={handleDeletePM} onAddGoal={handleAddGoal} onDeleteGoal={handleDeleteGoal} />}
-        {activeTab === 'backup' && <BackupRestoreTab items={items} paymentMethods={paymentMethods} transactions={transactions} quickAdds={quickAdds} goals={goals} paymentMethodBudgets={paymentMethodBudgets} onRestore={handleRestoreData} />}
+        {activeTab === 'backup' && <BackupRestoreTab onRestore={handleRestoreData} />}
       </main>
     </div>
   );
