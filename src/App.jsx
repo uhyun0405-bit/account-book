@@ -79,11 +79,19 @@ const defaultPaymentMethods = [
 ];
 
 // --- [탭 1] 이달의 현황 대시보드 컴포넌트 ---
-const DashboardTab = ({ items, paymentMethods, transactions, onImportFixedTransactions, budget, setBudget, onDeleteTransaction, goals }) => {
+const DashboardTab = ({ items, paymentMethods, transactions, onImportFixedTransactions, budget, setBudget, onDeleteTransaction, onUpdateTransaction, goals, paymentMethodBudgets, setPaymentMethodBudgets }) => {
   const [currentMonthStr, setCurrentMonthStr] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
   const [isEditingBudget, setIsEditingBudget] = useState(false);
   const [tempBudget, setTempBudget] = useState('');
+  
   const [deletingTxId, setDeletingTxId] = useState(null);
+  const [editingTxId, setEditingTxId] = useState(null);
+  const [editTxData, setEditTxData] = useState({});
+
+  // 결제수단별 예산 설정을 위한 상태
+  const [isAddingPMBudget, setIsAddingPMBudget] = useState(false);
+  const [selectedPM, setSelectedPM] = useState('');
+  const [pmBudgetAmt, setPmBudgetAmt] = useState('');
   
   const changeMonth = (offset) => {
     const [y, m] = currentMonthStr.split('-');
@@ -162,24 +170,60 @@ const DashboardTab = ({ items, paymentMethods, transactions, onImportFixedTransa
     setIsEditingBudget(false);
   };
 
-  const progress = budget > 0 ? Math.min((stats.expense / budget) * 100, 100) : 0;
-  const isWarning = progress >= 80;
-
-  // --- 기능 추가: 이번 달 결제 수단별 지출 총액 계산 ---
-  const expensesByPaymentMethod = useMemo(() => {
-    const grouped = {};
+  // 결제 수단별 지출액 집계
+  const spendingByPM = useMemo(() => {
+    const spending = {};
     monthlyTransactions.forEach(tx => {
-      if (tx.type === 'EXPENSE') { // 지출 항목만 집계
-        const pm = paymentMethods.find(p => p.id === tx.paymentMethodId);
-        const pmName = pm ? pm.name : '미지정';
-        grouped[pmName] = (grouped[pmName] || 0) + tx.amount;
+      if (tx.type === 'EXPENSE') {
+        const pmId = tx.paymentMethodId;
+        if (pmId) {
+          spending[pmId] = (spending[pmId] || 0) + tx.amount;
+        }
       }
     });
-    return Object.entries(grouped)
-      .map(([name, amount]) => ({ name, amount }))
-      .sort((a, b) => b.amount - a.amount);
-  }, [monthlyTransactions, paymentMethods]);
-  // --------------------------------------------------
+    return spending;
+  }, [monthlyTransactions]);
+
+  const handleSavePMBudget = () => {
+    if (!selectedPM || !pmBudgetAmt) return;
+    const amt = parseInt(pmBudgetAmt.replace(/[^0-9]/g, ''), 10);
+    if (!isNaN(amt) && amt > 0) {
+      setPaymentMethodBudgets(prev => ({ ...prev, [selectedPM]: amt }));
+    }
+    setIsAddingPMBudget(false);
+    setSelectedPM('');
+    setPmBudgetAmt('');
+  };
+
+  const handleDeletePMBudget = (pmId) => {
+    setPaymentMethodBudgets(prev => {
+      const next = { ...prev };
+      delete next[pmId];
+      return next;
+    });
+  };
+
+  const startEdit = (tx) => {
+    setEditingTxId(tx.id);
+    setEditTxData({ ...tx, amountStr: new Intl.NumberFormat('ko-KR').format(tx.amount) });
+  };
+
+  const handleEditSave = () => {
+    if (!editTxData.itemId || !editTxData.date || !editTxData.amountStr) {
+      alert('일자, 항목, 금액을 모두 입력해주세요.');
+      return;
+    }
+    const amt = parseInt(editTxData.amountStr.replace(/,/g, ''), 10);
+    if (isNaN(amt) || amt <= 0) {
+      alert('금액은 1원 이상이어야 합니다.');
+      return;
+    }
+    onUpdateTransaction({ ...editTxData, amount: amt });
+    setEditingTxId(null);
+  };
+
+  const progress = budget > 0 ? Math.min((stats.expense / budget) * 100, 100) : 0;
+  const isWarning = progress >= 80;
 
   return (
     <div className="space-y-6">
@@ -202,7 +246,7 @@ const DashboardTab = ({ items, paymentMethods, transactions, onImportFixedTransa
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {goals.map(goal => {
               const saved = transactions.filter(t => t.goalId === goal.id).reduce((sum, t) => sum + t.amount, 0);
-              const targetAmt = goal.targetAmount || 1; // 0 나누기 방지
+              const targetAmt = goal.targetAmount || 1; 
               const progress = Math.min((saved / targetAmt) * 100, 100);
               return (
                 <div key={goal.id} className="p-4 bg-slate-50 rounded-xl border border-slate-100">
@@ -300,24 +344,79 @@ const DashboardTab = ({ items, paymentMethods, transactions, onImportFixedTransa
         </div>
       </div>
 
-      {/* --- 기능 추가: 결제 수단별 지출 총액 UI --- */}
-      {expensesByPaymentMethod.length > 0 && (
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm mt-6">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-              <CreditCard size={16} className="text-slate-500"/> 결제 수단별 지출 총액
-            </h3>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-            {expensesByPaymentMethod.map((pm, idx) => (
-              <div key={idx} className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 flex flex-col gap-1.5">
-                <span className="text-xs font-bold text-slate-500">{pm.name}</span>
-                <span className="text-[15px] font-black text-slate-800">{formatCurrency(pm.amount)}</span>
-              </div>
-            ))}
-          </div>
+      {/* --- 기능 수정: 결제수단별 지출 총액 및 목표(예산) 관리 --- */}
+      <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm mt-6">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+            <CreditCard size={16} className="text-slate-500"/> 결제 수단별 지출 총액 및 목표 관리
+          </h3>
+          <button onClick={() => setIsAddingPMBudget(!isAddingPMBudget)} className="text-xs text-blue-600 font-bold bg-blue-50 px-2 py-1 rounded hover:bg-blue-100 transition-colors">
+            {isAddingPMBudget ? '취소' : '+ 목표 금액 설정'}
+          </button>
         </div>
-      )}
+
+        {isAddingPMBudget && (
+          <div className="flex flex-col sm:flex-row gap-2 mb-4 p-3 bg-slate-50 rounded-lg border border-slate-100 animate-in fade-in slide-in-from-top-2">
+            <select value={selectedPM} onChange={e => setSelectedPM(e.target.value)} className="border border-slate-200 p-2 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-200 flex-1 bg-white font-medium">
+              <option value="">결제 수단 선택</option>
+              {paymentMethods.map(pm => <option key={pm.id} value={pm.id}>{pm.name}</option>)}
+            </select>
+            <div className="relative flex-1">
+              <input type="text" value={pmBudgetAmt} onChange={e => {
+                const val = e.target.value.replace(/[^0-9]/g, '');
+                setPmBudgetAmt(val ? new Intl.NumberFormat('ko-KR').format(parseInt(val, 10)) : '');
+              }} placeholder="목표 금액 입력" className="border border-slate-200 p-2 pr-6 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-200 w-full text-right bg-white font-bold" />
+              <span className="absolute right-2 top-2 text-[10px] text-slate-400 font-bold">원</span>
+            </div>
+            <button onClick={handleSavePMBudget} className="bg-slate-800 hover:bg-slate-700 text-white text-xs px-4 py-2 rounded-lg font-bold transition-colors shadow-sm">저장</button>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {paymentMethods.filter(pm => spendingByPM[pm.id] || paymentMethodBudgets[pm.id]).length === 0 && !isAddingPMBudget ? (
+            <div className="col-span-1 md:col-span-2 text-center text-xs text-slate-400 py-8 bg-slate-50 rounded-xl border border-slate-100">결제 내역 및 설정된 목표가 없습니다.</div>
+          ) : (
+            paymentMethods.map(pm => {
+              const spent = spendingByPM[pm.id] || 0;
+              const target = paymentMethodBudgets[pm.id];
+              
+              if (!target && spent === 0) return null; // 사용 내역도 없고 목표도 없으면 숨김
+
+              if (target) {
+                const progress = Math.min((spent / target) * 100, 100);
+                const isWarning = progress >= 80;
+                const isExceeded = progress >= 100;
+                return (
+                  <div key={pm.id} className="flex flex-col gap-1.5 p-3.5 rounded-xl border border-slate-100 bg-slate-50/50 hover:border-blue-100 transition-colors">
+                    <div className="flex justify-between text-xs items-end mb-1">
+                      <span className="font-bold text-slate-700 flex items-center gap-1">
+                        {pm.name}
+                        <button onClick={() => handleDeletePMBudget(pm.id)} className="text-slate-300 hover:text-red-500 transition-colors" title="목표 삭제"><X size={12}/></button>
+                      </span>
+                      <span className="font-bold text-slate-600">
+                        <span className={isExceeded ? 'text-red-600 font-black' : isWarning ? 'text-red-500' : 'text-blue-600'}>{formatCurrency(spent)}</span> / {formatCurrency(target)}
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden shadow-inner">
+                      <div className={`h-full rounded-full transition-all duration-500 ${isExceeded ? 'bg-red-600' : isWarning ? 'bg-red-400' : 'bg-blue-500'}`} style={{ width: `${progress}%` }}></div>
+                    </div>
+                    <div className="text-right text-[10px] font-bold text-slate-500 mt-0.5">
+                      {progress.toFixed(1)}% 사용 {isExceeded && ' (초과)'}
+                    </div>
+                  </div>
+                );
+              } else {
+                return (
+                  <div key={pm.id} className="flex justify-between items-center p-3.5 rounded-xl border border-slate-100 bg-slate-50/50 hover:border-slate-200 transition-colors">
+                    <span className="text-xs font-bold text-slate-500">{pm.name}</span>
+                    <span className="text-[15px] font-black text-slate-800">{formatCurrency(spent)}</span>
+                  </div>
+                );
+              }
+            })
+          )}
+        </div>
+      </div>
       {/* -------------------------------------- */}
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mt-6">
@@ -339,7 +438,7 @@ const DashboardTab = ({ items, paymentMethods, transactions, onImportFixedTransa
             </thead>
             <tbody className="divide-y divide-slate-200">
               {monthlyTransactions.length === 0 ? (
-                <tr><td colSpan="7" className="px-4 py-8 text-center text-slate-500">이번 달 기록된 내역이 없습니다.</td></tr>
+                <tr><td colSpan="8" className="px-4 py-8 text-center text-slate-500">이번 달 기록된 내역이 없습니다.</td></tr>
               ) : (
                 monthlyTransactions.map(tx => {
                   const item = items.find(i => i.id === tx.itemId);
@@ -353,7 +452,64 @@ const DashboardTab = ({ items, paymentMethods, transactions, onImportFixedTransa
 
                   return (
                     <tr key={tx.id} className="hover:bg-slate-50 transition-colors">
-                      {deletingTxId === tx.id ? (
+                      {editingTxId === tx.id ? (
+                        <td colSpan="8" className="p-4 bg-blue-50/60 border-y border-blue-200 shadow-inner">
+                          <div className="flex flex-col gap-3">
+                            <div className="text-sm font-bold text-blue-800 flex items-center gap-1.5"><Pencil size={16}/> 내역 수정</div>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 text-xs">
+                              <div className="flex flex-col gap-1">
+                                <label className="font-bold text-slate-600">일자</label>
+                                <input type="date" value={editTxData.date} onChange={e => setEditTxData({...editTxData, date: e.target.value})} className="border border-slate-300 p-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-300 bg-white" />
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <label className="font-bold text-slate-600">유형</label>
+                                <select value={editTxData.type} onChange={e => setEditTxData({...editTxData, type: e.target.value, itemId: '', goalId: ''})} className="border border-slate-300 p-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-300 bg-white font-medium">
+                                  <option value="INCOME">수입</option>
+                                  <option value="EXPENSE">지출</option>
+                                  <option value="SAVING">저축</option>
+                                </select>
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <label className="font-bold text-slate-600">항목명</label>
+                                <select value={editTxData.itemId} onChange={e => setEditTxData({...editTxData, itemId: e.target.value})} className="border border-slate-300 p-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-300 bg-white font-medium">
+                                  <option value="">항목 선택</option>
+                                  {items.filter(i => i.type === editTxData.type).map(i => <option key={i.id} value={i.id}>[{i.category}] {i.name}</option>)}
+                                </select>
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <label className="font-bold text-slate-600">결제수단</label>
+                                <select value={editTxData.paymentMethodId || ''} onChange={e => setEditTxData({...editTxData, paymentMethodId: e.target.value})} className="border border-slate-300 p-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-300 bg-white font-medium">
+                                  <option value="">선택안함</option>
+                                  {paymentMethods.map(pm => <option key={pm.id} value={pm.id}>{pm.name}</option>)}
+                                </select>
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <label className="font-bold text-slate-600">금액</label>
+                                <input type="text" value={editTxData.amountStr} onChange={e => {
+                                  const val = e.target.value.replace(/[^0-9]/g, '');
+                                  setEditTxData({...editTxData, amountStr: val ? new Intl.NumberFormat('ko-KR').format(parseInt(val, 10)) : ''});
+                                }} className="border border-slate-300 p-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-300 text-right bg-white font-extrabold" placeholder="0" />
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <label className="font-bold text-slate-600">{editTxData.type === 'SAVING' ? '목표/메모' : '메모'}</label>
+                                <div className="flex flex-col gap-1">
+                                  {editTxData.type === 'SAVING' && goals.length > 0 && (
+                                    <select value={editTxData.goalId || ''} onChange={e => setEditTxData({...editTxData, goalId: e.target.value})} className="border border-slate-300 p-1.5 rounded outline-none focus:ring-2 focus:ring-blue-300 bg-white text-[11px] font-medium">
+                                      <option value="">목표 없음</option>
+                                      {goals.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                                    </select>
+                                  )}
+                                  <input type="text" value={editTxData.note || ''} onChange={e => setEditTxData({...editTxData, note: e.target.value})} className={`border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-300 bg-white font-medium ${editTxData.type === 'SAVING' && goals.length > 0 ? 'p-1.5 text-[11px]' : 'p-2'}`} placeholder="메모 입력" />
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex justify-end gap-2 mt-2">
+                              <button onClick={() => setEditingTxId(null)} className="px-4 py-2 bg-white border border-slate-300 text-slate-700 text-xs font-bold rounded-lg shadow-sm hover:bg-slate-50 transition-colors">취소</button>
+                              <button onClick={handleEditSave} className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg shadow-sm hover:bg-blue-700 transition-colors">저장하기</button>
+                            </div>
+                          </div>
+                        </td>
+                      ) : deletingTxId === tx.id ? (
                         <>
                           <td colSpan="5" className="p-3 text-center text-red-600 font-bold text-sm bg-red-50/50">정말 삭제할까요?</td>
                           <td colSpan="2" className="p-3 text-center whitespace-nowrap bg-red-50/50">
@@ -376,6 +532,7 @@ const DashboardTab = ({ items, paymentMethods, transactions, onImportFixedTransa
                             {tx.note || '-'}
                           </td>
                           <td className="px-3 py-3 text-center">
+                            <button onClick={() => startEdit(tx)} className="p-1.5 text-slate-400 hover:text-blue-600 bg-white rounded shadow-sm border border-slate-200 transition-colors mr-1" title="수정"><Pencil size={14}/></button>
                             <button onClick={() => setDeletingTxId(tx.id)} className="p-1.5 text-slate-400 hover:text-red-600 bg-white rounded shadow-sm border border-slate-200 transition-colors" title="삭제"><Trash2 size={14}/></button>
                           </td>
                         </>
@@ -393,11 +550,14 @@ const DashboardTab = ({ items, paymentMethods, transactions, onImportFixedTransa
 };
 
 // --- [탭 2] 수입/지출 입력 컴포넌트 ---
-const TransactionTab = ({ items, paymentMethods, transactions, quickAdds, setQuickAdds, goals, onAddTransaction, onDeleteTransaction }) => {
+const TransactionTab = ({ items, paymentMethods, transactions, quickAdds, setQuickAdds, goals, onAddTransaction, onDeleteTransaction, onUpdateTransaction }) => {
   const today = new Date().toISOString().split('T')[0];
   const defaultMethod = paymentMethods.length > 0 ? paymentMethods[0].id : '';
   const [formData, setFormData] = useState({ itemId: '', type: 'EXPENSE', amount: '', note: '', paymentMethodId: defaultMethod, date: today, isFixed: false, goalId: '' });
+  
   const [deletingTxId, setDeletingTxId] = useState(null);
+  const [editingTxId, setEditingTxId] = useState(null);
+  const [editTxData, setEditTxData] = useState({});
   const [inlineMessage, setInlineMessage] = useState(null);
 
   const filteredItems = useMemo(() => items.filter(item => item.type === formData.type).sort((a, b) => (a.category || '').localeCompare(b.category || '', 'ko-KR')), [items, formData.type]);
@@ -485,6 +645,25 @@ const TransactionTab = ({ items, paymentMethods, transactions, quickAdds, setQui
   const deleteQuickAdd = (id, e) => {
     e.stopPropagation();
     setQuickAdds(prev => prev.filter(q => q.id !== id));
+  };
+
+  const startEdit = (tx) => {
+    setEditingTxId(tx.id);
+    setEditTxData({ ...tx, amountStr: new Intl.NumberFormat('ko-KR').format(tx.amount) });
+  };
+
+  const handleEditSave = () => {
+    if (!editTxData.itemId || !editTxData.date || !editTxData.amountStr) {
+      alert('일자, 항목, 금액을 모두 입력해주세요.');
+      return;
+    }
+    const amt = parseInt(editTxData.amountStr.replace(/,/g, ''), 10);
+    if (isNaN(amt) || amt <= 0) {
+      alert('금액은 1원 이상이어야 합니다.');
+      return;
+    }
+    onUpdateTransaction({ ...editTxData, amount: amt });
+    setEditingTxId(null);
   };
 
   return (
@@ -610,7 +789,7 @@ const TransactionTab = ({ items, paymentMethods, transactions, quickAdds, setQui
             </thead>
             <tbody className="divide-y divide-slate-200">
               {recentTransactions.length === 0 ? (
-                <tr><td colSpan="7" className="px-4 py-8 text-center text-slate-500">기록된 내역이 없습니다.</td></tr>
+                <tr><td colSpan="8" className="px-4 py-8 text-center text-slate-500">기록된 내역이 없습니다.</td></tr>
               ) : (
                 recentTransactions.map(tx => {
                   const item = items.find(i => i.id === tx.itemId);
@@ -624,7 +803,64 @@ const TransactionTab = ({ items, paymentMethods, transactions, quickAdds, setQui
 
                   return (
                     <tr key={tx.id} className="hover:bg-slate-50 transition-colors">
-                      {deletingTxId === tx.id ? (
+                      {editingTxId === tx.id ? (
+                        <td colSpan="8" className="p-4 bg-blue-50/60 border-y border-blue-200 shadow-inner">
+                          <div className="flex flex-col gap-3">
+                            <div className="text-sm font-bold text-blue-800 flex items-center gap-1.5"><Pencil size={16}/> 내역 수정</div>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 text-xs">
+                              <div className="flex flex-col gap-1">
+                                <label className="font-bold text-slate-600">일자</label>
+                                <input type="date" value={editTxData.date} onChange={e => setEditTxData({...editTxData, date: e.target.value})} className="border border-slate-300 p-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-300 bg-white" />
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <label className="font-bold text-slate-600">유형</label>
+                                <select value={editTxData.type} onChange={e => setEditTxData({...editTxData, type: e.target.value, itemId: '', goalId: ''})} className="border border-slate-300 p-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-300 bg-white font-medium">
+                                  <option value="INCOME">수입</option>
+                                  <option value="EXPENSE">지출</option>
+                                  <option value="SAVING">저축</option>
+                                </select>
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <label className="font-bold text-slate-600">항목명</label>
+                                <select value={editTxData.itemId} onChange={e => setEditTxData({...editTxData, itemId: e.target.value})} className="border border-slate-300 p-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-300 bg-white font-medium">
+                                  <option value="">항목 선택</option>
+                                  {items.filter(i => i.type === editTxData.type).map(i => <option key={i.id} value={i.id}>[{i.category}] {i.name}</option>)}
+                                </select>
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <label className="font-bold text-slate-600">결제수단</label>
+                                <select value={editTxData.paymentMethodId || ''} onChange={e => setEditTxData({...editTxData, paymentMethodId: e.target.value})} className="border border-slate-300 p-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-300 bg-white font-medium">
+                                  <option value="">선택안함</option>
+                                  {paymentMethods.map(pm => <option key={pm.id} value={pm.id}>{pm.name}</option>)}
+                                </select>
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <label className="font-bold text-slate-600">금액</label>
+                                <input type="text" value={editTxData.amountStr} onChange={e => {
+                                  const val = e.target.value.replace(/[^0-9]/g, '');
+                                  setEditTxData({...editTxData, amountStr: val ? new Intl.NumberFormat('ko-KR').format(parseInt(val, 10)) : ''});
+                                }} className="border border-slate-300 p-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-300 text-right bg-white font-extrabold" placeholder="0" />
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <label className="font-bold text-slate-600">{editTxData.type === 'SAVING' ? '목표/메모' : '메모'}</label>
+                                <div className="flex flex-col gap-1">
+                                  {editTxData.type === 'SAVING' && goals.length > 0 && (
+                                    <select value={editTxData.goalId || ''} onChange={e => setEditTxData({...editTxData, goalId: e.target.value})} className="border border-slate-300 p-1.5 rounded outline-none focus:ring-2 focus:ring-blue-300 bg-white text-[11px] font-medium">
+                                      <option value="">목표 없음</option>
+                                      {goals.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                                    </select>
+                                  )}
+                                  <input type="text" value={editTxData.note || ''} onChange={e => setEditTxData({...editTxData, note: e.target.value})} className={`border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-300 bg-white font-medium ${editTxData.type === 'SAVING' && goals.length > 0 ? 'p-1.5 text-[11px]' : 'p-2'}`} placeholder="메모 입력" />
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex justify-end gap-2 mt-2">
+                              <button onClick={() => setEditingTxId(null)} className="px-4 py-2 bg-white border border-slate-300 text-slate-700 text-xs font-bold rounded-lg shadow-sm hover:bg-slate-50 transition-colors">취소</button>
+                              <button onClick={handleEditSave} className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg shadow-sm hover:bg-blue-700 transition-colors">저장하기</button>
+                            </div>
+                          </div>
+                        </td>
+                      ) : deletingTxId === tx.id ? (
                         <>
                           <td colSpan="5" className="p-3 text-center text-red-600 font-bold text-sm bg-red-50/50">정말 삭제할까요?</td>
                           <td colSpan="2" className="p-3 text-center whitespace-nowrap bg-red-50/50">
@@ -649,6 +885,7 @@ const TransactionTab = ({ items, paymentMethods, transactions, quickAdds, setQui
                             {tx.note || '-'}
                           </td>
                           <td className="px-3 py-3 text-center">
+                            <button onClick={() => startEdit(tx)} className="p-1.5 text-slate-400 hover:text-blue-600 bg-white rounded shadow-sm border border-slate-200 transition-colors mr-1" title="수정"><Pencil size={14}/></button>
                             <button onClick={() => setDeletingTxId(tx.id)} className="p-1.5 text-slate-400 hover:text-red-600 bg-white rounded shadow-sm border border-slate-200 transition-colors" title="삭제"><Trash2 size={14}/></button>
                           </td>
                         </>
@@ -666,11 +903,14 @@ const TransactionTab = ({ items, paymentMethods, transactions, quickAdds, setQui
 };
 
 // --- [탭 3] 통계/상세조회 컴포넌트 ---
-const ReportTab = ({ items, paymentMethods, transactions, onDeleteTransaction, goals }) => {
+const ReportTab = ({ items, paymentMethods, transactions, onDeleteTransaction, onUpdateTransaction, goals }) => {
   const [viewMode, setViewMode] = useState('monthly');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
+  
   const [deletingTxId, setDeletingTxId] = useState(null);
+  const [editingTxId, setEditingTxId] = useState(null);
+  const [editTxData, setEditTxData] = useState({});
   
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -719,6 +959,25 @@ const ReportTab = ({ items, paymentMethods, transactions, onDeleteTransaction, g
       .map(([category, amount]) => ({ category, amount, percentage: total > 0 ? (amount / total) * 100 : 0 }))
       .sort((a, b) => b.amount - a.amount);
   }, [filteredTransactions, items, periodStats.expense]);
+
+  const startEdit = (tx) => {
+    setEditingTxId(tx.id);
+    setEditTxData({ ...tx, amountStr: new Intl.NumberFormat('ko-KR').format(tx.amount) });
+  };
+
+  const handleEditSave = () => {
+    if (!editTxData.itemId || !editTxData.date || !editTxData.amountStr) {
+      alert('일자, 항목, 금액을 모두 입력해주세요.');
+      return;
+    }
+    const amt = parseInt(editTxData.amountStr.replace(/,/g, ''), 10);
+    if (isNaN(amt) || amt <= 0) {
+      alert('금액은 1원 이상이어야 합니다.');
+      return;
+    }
+    onUpdateTransaction({ ...editTxData, amount: amt });
+    setEditingTxId(null);
+  };
 
   return (
     <div className="space-y-6">
@@ -859,7 +1118,64 @@ const ReportTab = ({ items, paymentMethods, transactions, onDeleteTransaction, g
 
                   return (
                     <tr key={tx.id} className="hover:bg-slate-50 transition-colors">
-                      {deletingTxId === tx.id ? (
+                      {editingTxId === tx.id ? (
+                        <td colSpan="8" className="p-4 bg-blue-50/60 border-y border-blue-200 shadow-inner">
+                          <div className="flex flex-col gap-3">
+                            <div className="text-sm font-bold text-blue-800 flex items-center gap-1.5"><Pencil size={16}/> 내역 수정</div>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 text-xs">
+                              <div className="flex flex-col gap-1">
+                                <label className="font-bold text-slate-600">일자</label>
+                                <input type="date" value={editTxData.date} onChange={e => setEditTxData({...editTxData, date: e.target.value})} className="border border-slate-300 p-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-300 bg-white" />
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <label className="font-bold text-slate-600">유형</label>
+                                <select value={editTxData.type} onChange={e => setEditTxData({...editTxData, type: e.target.value, itemId: '', goalId: ''})} className="border border-slate-300 p-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-300 bg-white font-medium">
+                                  <option value="INCOME">수입</option>
+                                  <option value="EXPENSE">지출</option>
+                                  <option value="SAVING">저축</option>
+                                </select>
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <label className="font-bold text-slate-600">항목명</label>
+                                <select value={editTxData.itemId} onChange={e => setEditTxData({...editTxData, itemId: e.target.value})} className="border border-slate-300 p-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-300 bg-white font-medium">
+                                  <option value="">항목 선택</option>
+                                  {items.filter(i => i.type === editTxData.type).map(i => <option key={i.id} value={i.id}>[{i.category}] {i.name}</option>)}
+                                </select>
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <label className="font-bold text-slate-600">결제수단</label>
+                                <select value={editTxData.paymentMethodId || ''} onChange={e => setEditTxData({...editTxData, paymentMethodId: e.target.value})} className="border border-slate-300 p-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-300 bg-white font-medium">
+                                  <option value="">선택안함</option>
+                                  {paymentMethods.map(pm => <option key={pm.id} value={pm.id}>{pm.name}</option>)}
+                                </select>
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <label className="font-bold text-slate-600">금액</label>
+                                <input type="text" value={editTxData.amountStr} onChange={e => {
+                                  const val = e.target.value.replace(/[^0-9]/g, '');
+                                  setEditTxData({...editTxData, amountStr: val ? new Intl.NumberFormat('ko-KR').format(parseInt(val, 10)) : ''});
+                                }} className="border border-slate-300 p-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-300 text-right bg-white font-extrabold" placeholder="0" />
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <label className="font-bold text-slate-600">{editTxData.type === 'SAVING' ? '목표/메모' : '메모'}</label>
+                                <div className="flex flex-col gap-1">
+                                  {editTxData.type === 'SAVING' && goals.length > 0 && (
+                                    <select value={editTxData.goalId || ''} onChange={e => setEditTxData({...editTxData, goalId: e.target.value})} className="border border-slate-300 p-1.5 rounded outline-none focus:ring-2 focus:ring-blue-300 bg-white text-[11px] font-medium">
+                                      <option value="">목표 없음</option>
+                                      {goals.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                                    </select>
+                                  )}
+                                  <input type="text" value={editTxData.note || ''} onChange={e => setEditTxData({...editTxData, note: e.target.value})} className={`border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-300 bg-white font-medium ${editTxData.type === 'SAVING' && goals.length > 0 ? 'p-1.5 text-[11px]' : 'p-2'}`} placeholder="메모 입력" />
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex justify-end gap-2 mt-2">
+                              <button onClick={() => setEditingTxId(null)} className="px-4 py-2 bg-white border border-slate-300 text-slate-700 text-xs font-bold rounded-lg shadow-sm hover:bg-slate-50 transition-colors">취소</button>
+                              <button onClick={handleEditSave} className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg shadow-sm hover:bg-blue-700 transition-colors">저장하기</button>
+                            </div>
+                          </div>
+                        </td>
+                      ) : deletingTxId === tx.id ? (
                         <>
                           <td colSpan={viewMode === 'monthly' ? 6 : 5} className="p-3 text-center text-red-600 font-bold text-sm bg-red-50/50">정말 삭제하시겠습니까?</td>
                           <td colSpan="2" className="p-3 text-center whitespace-nowrap bg-red-50/50">
@@ -886,6 +1202,7 @@ const ReportTab = ({ items, paymentMethods, transactions, onDeleteTransaction, g
                             {tx.note || '-'}
                           </td>
                           <td className="px-3 py-3 text-center">
+                            <button onClick={() => startEdit(tx)} className="p-1.5 text-slate-400 hover:text-blue-600 bg-white rounded shadow-sm border border-slate-200 transition-colors mr-1" title="수정"><Pencil size={14}/></button>
                             <button onClick={() => setDeletingTxId(tx.id)} className="p-1.5 text-slate-400 hover:text-red-600 bg-white rounded shadow-sm border border-slate-200 transition-colors" title="삭제"><Trash2 size={14}/></button>
                           </td>
                         </>
@@ -1098,7 +1415,7 @@ const ItemManagementTab = ({ items, paymentMethods, goals, onAddItem, onUpdateIt
 };
 
 // --- [탭 5] 데이터 백업 / 복원 컴포넌트 ---
-const BackupRestoreTab = ({ items, paymentMethods, transactions, quickAdds, goals, onRestore }) => {
+const BackupRestoreTab = ({ items, paymentMethods, transactions, quickAdds, goals, paymentMethodBudgets, onRestore }) => {
   const fileInputRef = useRef(null);
   const [inlineMessage, setInlineMessage] = useState(null);
 
@@ -1109,7 +1426,7 @@ const BackupRestoreTab = ({ items, paymentMethods, transactions, quickAdds, goal
 
   const handleExportBackup = () => {
     try {
-      const backupData = { items, paymentMethods, transactions, quickAdds, goals, exportDate: new Date().toISOString() };
+      const backupData = { items, paymentMethods, transactions, quickAdds, goals, paymentMethodBudgets, exportDate: new Date().toISOString() };
       
       const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json;charset=utf-8;' });
       const url = window.URL.createObjectURL(blob);
@@ -1203,6 +1520,9 @@ export default function App() {
   const [paymentMethods, setPaymentMethods] = useState(() => loadLocalData('accountbook_pay_methods', defaultPaymentMethods));
   const [quickAdds, setQuickAdds] = useState(() => loadLocalData('accountbook_quick_adds', []));
   const [goals, setGoals] = useState(() => loadLocalData('accountbook_goals', []));
+  
+  // 결제 수단별 예산 저장을 위한 새로운 State
+  const [paymentMethodBudgets, setPaymentMethodBudgets] = useState(() => loadLocalData('accountbook_pm_budgets', {}));
 
   useEffect(() => saveLocalData('accountbook_local_items', items), [items]);
   useEffect(() => saveLocalData('accountbook_local_txs', transactions), [transactions]);
@@ -1210,6 +1530,7 @@ export default function App() {
   useEffect(() => saveLocalData('accountbook_pay_methods', paymentMethods), [paymentMethods]);
   useEffect(() => saveLocalData('accountbook_quick_adds', quickAdds), [quickAdds]);
   useEffect(() => saveLocalData('accountbook_goals', goals), [goals]);
+  useEffect(() => saveLocalData('accountbook_pm_budgets', paymentMethodBudgets), [paymentMethodBudgets]);
 
   const handleNameSave = () => {
     if (tempAppName.trim() !== '') {
@@ -1228,6 +1549,7 @@ export default function App() {
 
   const handleAddTransaction = (newTx) => setTransactions(prev => [...prev, newTx]);
   const handleDeleteTransaction = (id) => setTransactions(prev => prev.filter(tx => tx.id !== id));
+  const handleUpdateTransaction = (updatedTx) => setTransactions(prev => prev.map(tx => tx.id === updatedTx.id ? updatedTx : tx));
 
   const handleAddGoal = (newGoal) => setGoals(prev => [...prev, newGoal]);
   const handleDeleteGoal = (id) => setGoals(prev => prev.filter(g => g.id !== id));
@@ -1262,6 +1584,7 @@ export default function App() {
     if (data.paymentMethods) setPaymentMethods(data.paymentMethods);
     if (data.quickAdds) setQuickAdds(data.quickAdds);
     if (data.goals) setGoals(data.goals);
+    if (data.paymentMethodBudgets) setPaymentMethodBudgets(data.paymentMethodBudgets);
   };
 
   return (
@@ -1292,11 +1615,11 @@ export default function App() {
       </header>
 
       <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {activeTab === 'dashboard' && <DashboardTab items={items} paymentMethods={paymentMethods} transactions={transactions} onImportFixedTransactions={handleImportFixedTransactions} budget={budget} setBudget={setBudget} onDeleteTransaction={handleDeleteTransaction} goals={goals} />}
-        {activeTab === 'transactions' && <TransactionTab items={items} paymentMethods={paymentMethods} transactions={transactions} quickAdds={quickAdds} setQuickAdds={setQuickAdds} goals={goals} onAddTransaction={handleAddTransaction} onDeleteTransaction={handleDeleteTransaction} />}
-        {activeTab === 'calendar' && <ReportTab items={items} paymentMethods={paymentMethods} transactions={transactions} onDeleteTransaction={handleDeleteTransaction} goals={goals} />}
+        {activeTab === 'dashboard' && <DashboardTab items={items} paymentMethods={paymentMethods} transactions={transactions} onImportFixedTransactions={handleImportFixedTransactions} budget={budget} setBudget={setBudget} onDeleteTransaction={handleDeleteTransaction} onUpdateTransaction={handleUpdateTransaction} goals={goals} paymentMethodBudgets={paymentMethodBudgets} setPaymentMethodBudgets={setPaymentMethodBudgets} />}
+        {activeTab === 'transactions' && <TransactionTab items={items} paymentMethods={paymentMethods} transactions={transactions} quickAdds={quickAdds} setQuickAdds={setQuickAdds} goals={goals} onAddTransaction={handleAddTransaction} onDeleteTransaction={handleDeleteTransaction} onUpdateTransaction={handleUpdateTransaction} />}
+        {activeTab === 'calendar' && <ReportTab items={items} paymentMethods={paymentMethods} transactions={transactions} onDeleteTransaction={handleDeleteTransaction} onUpdateTransaction={handleUpdateTransaction} goals={goals} />}
         {activeTab === 'items' && <ItemManagementTab items={items} paymentMethods={paymentMethods} goals={goals} onAddItem={handleAddItem} onUpdateItem={handleUpdateItem} onDeleteItem={handleDeleteItem} onAddPM={handleAddPM} onDeletePM={handleDeletePM} onAddGoal={handleAddGoal} onDeleteGoal={handleDeleteGoal} />}
-        {activeTab === 'backup' && <BackupRestoreTab items={items} paymentMethods={paymentMethods} transactions={transactions} quickAdds={quickAdds} goals={goals} onRestore={handleRestoreData} />}
+        {activeTab === 'backup' && <BackupRestoreTab items={items} paymentMethods={paymentMethods} transactions={transactions} quickAdds={quickAdds} goals={goals} paymentMethodBudgets={paymentMethodBudgets} onRestore={handleRestoreData} />}
       </main>
     </div>
   );
