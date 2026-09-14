@@ -170,7 +170,6 @@ const DashboardTab = ({ items, paymentMethods, transactions, onImportFixedTransa
     setIsEditingBudget(false);
   };
 
-  // 결제 수단별 지출액 집계
   const spendingByPM = useMemo(() => {
     const spending = {};
     monthlyTransactions.forEach(tx => {
@@ -184,11 +183,19 @@ const DashboardTab = ({ items, paymentMethods, transactions, onImportFixedTransa
     return spending;
   }, [monthlyTransactions]);
 
+  const currentMonthPMBudgets = paymentMethodBudgets[currentMonthStr] || {};
+
   const handleSavePMBudget = () => {
     if (!selectedPM || !pmBudgetAmt) return;
     const amt = parseInt(pmBudgetAmt.replace(/[^0-9]/g, ''), 10);
     if (!isNaN(amt) && amt > 0) {
-      setPaymentMethodBudgets(prev => ({ ...prev, [selectedPM]: amt }));
+      setPaymentMethodBudgets(prev => ({
+        ...prev,
+        [currentMonthStr]: {
+          ...(prev[currentMonthStr] || {}),
+          [selectedPM]: amt
+        }
+      }));
     }
     setIsAddingPMBudget(false);
     setSelectedPM('');
@@ -197,10 +204,36 @@ const DashboardTab = ({ items, paymentMethods, transactions, onImportFixedTransa
 
   const handleDeletePMBudget = (pmId) => {
     setPaymentMethodBudgets(prev => {
-      const next = { ...prev };
-      delete next[pmId];
-      return next;
+      const monthData = { ...(prev[currentMonthStr] || {}) };
+      delete monthData[pmId];
+      return {
+        ...prev,
+        [currentMonthStr]: monthData
+      };
     });
+  };
+
+  const handleImportPrevMonthPMBudgets = () => {
+    const [y, m] = currentMonthStr.split('-');
+    const prevDate = new Date(parseInt(y, 10), parseInt(m, 10) - 2, 15);
+    const prevMonthStr = prevDate.toISOString().slice(0, 7);
+
+    const prevBudgets = paymentMethodBudgets[prevMonthStr];
+    
+    if (!prevBudgets || Object.keys(prevBudgets).length === 0) {
+      alert('이전 달에 설정된 결제 수단 목표 금액이 없습니다.');
+      return;
+    }
+
+    if (window.confirm(`${prevMonthStr.replace('-', '년 ')}월의 목표 금액을 그대로 가져오시겠습니까?`)) {
+      setPaymentMethodBudgets(prev => ({
+        ...prev,
+        [currentMonthStr]: {
+          ...(prev[currentMonthStr] || {}),
+          ...prevBudgets
+        }
+      }));
+    }
   };
 
   const startEdit = (tx) => {
@@ -344,15 +377,19 @@ const DashboardTab = ({ items, paymentMethods, transactions, onImportFixedTransa
         </div>
       </div>
 
-      {/* --- 기능 수정: 결제수단별 지출 총액 및 목표(예산) 관리 --- */}
       <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm mt-6">
-        <div className="flex justify-between items-center mb-4">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-4 gap-3">
           <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-            <CreditCard size={16} className="text-slate-500"/> 결제 수단별 지출 총액 및 목표 관리
+            <CreditCard size={16} className="text-slate-500"/> 결제 수단별 지출 총액 및 목표 관리 ({currentMonthStr.split('-')[1]}월)
           </h3>
-          <button onClick={() => setIsAddingPMBudget(!isAddingPMBudget)} className="text-xs text-blue-600 font-bold bg-blue-50 px-2 py-1 rounded hover:bg-blue-100 transition-colors">
-            {isAddingPMBudget ? '취소' : '+ 목표 금액 설정'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={handleImportPrevMonthPMBudgets} className="text-xs text-indigo-700 font-bold bg-indigo-50 border border-indigo-100 px-3 py-1.5 rounded hover:bg-indigo-100 transition-colors flex items-center gap-1.5 shadow-sm">
+              <CopyPlus size={14}/> 지난달 목표 불러오기
+            </button>
+            <button onClick={() => setIsAddingPMBudget(!isAddingPMBudget)} className="text-xs text-blue-700 font-bold bg-blue-50 border border-blue-100 px-3 py-1.5 rounded hover:bg-blue-100 transition-colors shadow-sm">
+              {isAddingPMBudget ? '설정 취소' : '+ 목표 금액 설정'}
+            </button>
+          </div>
         </div>
 
         {isAddingPMBudget && (
@@ -365,7 +402,7 @@ const DashboardTab = ({ items, paymentMethods, transactions, onImportFixedTransa
               <input type="text" value={pmBudgetAmt} onChange={e => {
                 const val = e.target.value.replace(/[^0-9]/g, '');
                 setPmBudgetAmt(val ? new Intl.NumberFormat('ko-KR').format(parseInt(val, 10)) : '');
-              }} placeholder="목표 금액 입력" className="border border-slate-200 p-2 pr-6 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-200 w-full text-right bg-white font-bold" />
+              }} placeholder="이번 달 목표 금액" className="border border-slate-200 p-2 pr-6 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-200 w-full text-right bg-white font-bold" />
               <span className="absolute right-2 top-2 text-[10px] text-slate-400 font-bold">원</span>
             </div>
             <button onClick={handleSavePMBudget} className="bg-slate-800 hover:bg-slate-700 text-white text-xs px-4 py-2 rounded-lg font-bold transition-colors shadow-sm">저장</button>
@@ -373,14 +410,14 @@ const DashboardTab = ({ items, paymentMethods, transactions, onImportFixedTransa
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {paymentMethods.filter(pm => spendingByPM[pm.id] || paymentMethodBudgets[pm.id]).length === 0 && !isAddingPMBudget ? (
+          {paymentMethods.filter(pm => spendingByPM[pm.id] || currentMonthPMBudgets[pm.id]).length === 0 && !isAddingPMBudget ? (
             <div className="col-span-1 md:col-span-2 text-center text-xs text-slate-400 py-8 bg-slate-50 rounded-xl border border-slate-100">결제 내역 및 설정된 목표가 없습니다.</div>
           ) : (
             paymentMethods.map(pm => {
               const spent = spendingByPM[pm.id] || 0;
-              const target = paymentMethodBudgets[pm.id];
+              const target = currentMonthPMBudgets[pm.id];
               
-              if (!target && spent === 0) return null; // 사용 내역도 없고 목표도 없으면 숨김
+              if (!target && spent === 0) return null;
 
               if (target) {
                 const progress = Math.min((spent / target) * 100, 100);
@@ -417,7 +454,6 @@ const DashboardTab = ({ items, paymentMethods, transactions, onImportFixedTransa
           )}
         </div>
       </div>
-      {/* -------------------------------------- */}
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mt-6">
         <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/50 flex justify-between items-center">
@@ -1220,7 +1256,7 @@ const ReportTab = ({ items, paymentMethods, transactions, onDeleteTransaction, o
 };
 
 // --- [탭 4] 항목 & 결제수단 관리 컴포넌트 ---
-const ItemManagementTab = ({ items, paymentMethods, goals, onAddItem, onUpdateItem, onDeleteItem, onAddPM, onDeletePM, onAddGoal, onDeleteGoal }) => {
+const ItemManagementTab = ({ items, paymentMethods, goals, onAddItem, onUpdateItem, onDeleteItem, onAddPM, onUpdatePM, onDeletePM, onAddGoal, onDeleteGoal }) => {
   const [newItem, setNewItem] = useState({ type: 'EXPENSE', category: '', name: '' });
   const [newPM, setNewPM] = useState('');
   const [newGoal, setNewGoal] = useState({ name: '', targetAmount: '' });
@@ -1228,6 +1264,11 @@ const ItemManagementTab = ({ items, paymentMethods, goals, onAddItem, onUpdateIt
   const [editingItemId, setEditingItemId] = useState(null);
   const [editFormData, setEditFormData] = useState({});
   const [deletingItemId, setDeletingItemId] = useState(null);
+  
+  // 결제수단 수정을 위한 상태
+  const [editingPMId, setEditingPMId] = useState(null);
+  const [editPMName, setEditPMName] = useState('');
+  
   const [inlineMessage, setInlineMessage] = useState(null);
 
   const showMessage = (msg, type = 'success') => {
@@ -1254,6 +1295,14 @@ const ItemManagementTab = ({ items, paymentMethods, goals, onAddItem, onUpdateIt
     onAddPM({ id: `p${Date.now()}`, name: newPM.trim() });
     setNewPM('');
     showMessage('결제 수단이 추가되었습니다.');
+  };
+
+  // 결제수단 수정 완료 처리
+  const handleSaveEditPM = (id) => {
+    if (!editPMName.trim()) return;
+    onUpdatePM({ id, name: editPMName.trim() });
+    setEditingPMId(null);
+    showMessage('결제 수단 이름이 수정되었습니다.');
   };
 
   const handleAddGoalSubmit = (e) => {
@@ -1314,10 +1363,21 @@ const ItemManagementTab = ({ items, paymentMethods, goals, onAddItem, onUpdateIt
           </form>
           <div className="flex flex-wrap gap-2">
             {paymentMethods.map(pm => (
-              <div key={pm.id} className="bg-slate-100 px-3 py-1.5 rounded-full text-xs font-bold text-slate-700 flex items-center gap-2 border border-slate-200">
-                {pm.name}
-                <button onClick={() => window.confirm('삭제하시겠습니까?') && onDeletePM(pm.id)} className="text-slate-400 hover:text-red-500"><X size={12}/></button>
-              </div>
+              editingPMId === pm.id ? (
+                <div key={pm.id} className="bg-white px-2 py-1 rounded-full text-xs font-bold text-slate-700 flex items-center gap-1 border border-blue-400 shadow-sm">
+                  <input type="text" value={editPMName} onChange={e => setEditPMName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSaveEditPM(pm.id)} className="outline-none bg-transparent w-20 text-xs" autoFocus />
+                  <button onClick={() => handleSaveEditPM(pm.id)} className="text-blue-600 p-1 hover:bg-blue-50 rounded-full"><Check size={12}/></button>
+                  <button onClick={() => setEditingPMId(null)} className="text-slate-400 p-1 hover:bg-slate-100 rounded-full"><X size={12}/></button>
+                </div>
+              ) : (
+                <div key={pm.id} className="bg-slate-100 px-3 py-1.5 rounded-full text-xs font-bold text-slate-700 flex items-center gap-1.5 border border-slate-200">
+                  {pm.name}
+                  <div className="flex items-center gap-1 border-l border-slate-300 pl-1.5 ml-1">
+                    <button onClick={() => { setEditingPMId(pm.id); setEditPMName(pm.name); }} className="text-slate-400 hover:text-blue-500" title="이름 수정"><Pencil size={12}/></button>
+                    <button onClick={() => window.confirm('삭제하시겠습니까?') && onDeletePM(pm.id)} className="text-slate-400 hover:text-red-500" title="삭제"><X size={12}/></button>
+                  </div>
+                </div>
+              )
             ))}
           </div>
         </div>
@@ -1545,6 +1605,7 @@ export default function App() {
   const handleDeleteItem = (id) => setItems(prev => prev.filter(i => i.id !== id));
   
   const handleAddPM = (newPM) => setPaymentMethods(prev => [...prev, newPM]);
+  const handleUpdatePM = (updatedPM) => setPaymentMethods(prev => prev.map(p => p.id === updatedPM.id ? updatedPM : p));
   const handleDeletePM = (id) => setPaymentMethods(prev => prev.filter(p => p.id !== id));
 
   const handleAddTransaction = (newTx) => setTransactions(prev => [...prev, newTx]);
@@ -1618,7 +1679,7 @@ export default function App() {
         {activeTab === 'dashboard' && <DashboardTab items={items} paymentMethods={paymentMethods} transactions={transactions} onImportFixedTransactions={handleImportFixedTransactions} budget={budget} setBudget={setBudget} onDeleteTransaction={handleDeleteTransaction} onUpdateTransaction={handleUpdateTransaction} goals={goals} paymentMethodBudgets={paymentMethodBudgets} setPaymentMethodBudgets={setPaymentMethodBudgets} />}
         {activeTab === 'transactions' && <TransactionTab items={items} paymentMethods={paymentMethods} transactions={transactions} quickAdds={quickAdds} setQuickAdds={setQuickAdds} goals={goals} onAddTransaction={handleAddTransaction} onDeleteTransaction={handleDeleteTransaction} onUpdateTransaction={handleUpdateTransaction} />}
         {activeTab === 'calendar' && <ReportTab items={items} paymentMethods={paymentMethods} transactions={transactions} onDeleteTransaction={handleDeleteTransaction} onUpdateTransaction={handleUpdateTransaction} goals={goals} />}
-        {activeTab === 'items' && <ItemManagementTab items={items} paymentMethods={paymentMethods} goals={goals} onAddItem={handleAddItem} onUpdateItem={handleUpdateItem} onDeleteItem={handleDeleteItem} onAddPM={handleAddPM} onDeletePM={handleDeletePM} onAddGoal={handleAddGoal} onDeleteGoal={handleDeleteGoal} />}
+        {activeTab === 'items' && <ItemManagementTab items={items} paymentMethods={paymentMethods} goals={goals} onAddItem={handleAddItem} onUpdateItem={handleUpdateItem} onDeleteItem={handleDeleteItem} onAddPM={handleAddPM} onUpdatePM={handleUpdatePM} onDeletePM={handleDeletePM} onAddGoal={handleAddGoal} onDeleteGoal={handleDeleteGoal} />}
         {activeTab === 'backup' && <BackupRestoreTab items={items} paymentMethods={paymentMethods} transactions={transactions} quickAdds={quickAdds} goals={goals} paymentMethodBudgets={paymentMethodBudgets} onRestore={handleRestoreData} />}
       </main>
     </div>
